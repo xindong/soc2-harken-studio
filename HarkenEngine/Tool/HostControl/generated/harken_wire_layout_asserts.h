@@ -3230,6 +3230,21 @@ static_assert(offsetof(VnAbiVersionInfo, major) == 4,
 static_assert(offsetof(VnAbiVersionInfo, minor) == 8,
               "wire table offset drift: VnAbiVersionInfo.minor");
 
+static_assert(sizeof(VnHostOutputFormatV1) == 24,
+              "wire table size drift: VnHostOutputFormatV1");
+static_assert(offsetof(VnHostOutputFormatV1, structSize) == 0,
+              "wire table offset drift: VnHostOutputFormatV1.structSize");
+static_assert(offsetof(VnHostOutputFormatV1, sampleRate) == 4,
+              "wire table offset drift: VnHostOutputFormatV1.sampleRate");
+static_assert(offsetof(VnHostOutputFormatV1, channelCount) == 8,
+              "wire table offset drift: VnHostOutputFormatV1.channelCount");
+static_assert(offsetof(VnHostOutputFormatV1, channelLayout) == 12,
+              "wire table offset drift: VnHostOutputFormatV1.channelLayout");
+static_assert(offsetof(VnHostOutputFormatV1, blockFrames) == 16,
+              "wire table offset drift: VnHostOutputFormatV1.blockFrames");
+static_assert(offsetof(VnHostOutputFormatV1, reserved0) == 20,
+              "wire table offset drift: VnHostOutputFormatV1.reserved0");
+
 static_assert(sizeof(VnPackFormatVersionInfo) == 12,
               "wire table size drift: VnPackFormatVersionInfo");
 static_assert(offsetof(VnPackFormatVersionInfo, structSize) == 0,

@@ -163,7 +163,12 @@ enum {
 /* Values for VnConfig.deviceMode. */
 enum {
     VN_DEVICE_REAL = 0, /* real audio device output */
-    VN_DEVICE_NULL = 1  /* headless: blocks are pumped by the host/test clock */
+    VN_DEVICE_NULL = 1, /* headless: blocks are pumped by the host/test clock */
+    /* Host-owned output: no audio device is opened and no render clock runs.
+     * The host pulls mixed PCM through Vn_RenderHostOutput. Requires an
+     * explicit sampleRate and deviceChannelLayout and zero render workers;
+     * anything else is VN_INVALID_CONFIG. */
+    VN_DEVICE_HOST = 2
 };
 
 /* Notification record; the full definition appears after VnVoiceHandle
@@ -471,6 +476,45 @@ VnResult Vn_Resume(void);
  * with no audible effect. mute01 above 1 is VN_INVALID_ARG; an absent or
  * failed engine returns VN_NOT_INITIALIZED. Logic thread only. */
 VnResult Vn_SetHostOutputMute(uint32_t mute01, uint32_t fadeMs);
+
+/* Output format of a VN_DEVICE_HOST session. PCM is interleaved float32 in
+ * the channelLayout's channel order. blockFrames is the internal render block;
+ * Vn_RenderHostOutput accepts any frame count. */
+typedef struct VnHostOutputFormatV1 {
+    uint32_t structSize; /* set to sizeof(VnHostOutputFormatV1) */
+    uint32_t sampleRate;
+    uint32_t channelCount;
+    uint32_t channelLayout; /* VN_CHANNEL_LAYOUT_* */
+    uint32_t blockFrames;
+    uint32_t reserved0;
+} VnHostOutputFormatV1;
+
+#ifdef __cplusplus
+static_assert(sizeof(VnHostOutputFormatV1) == 24, "VnHostOutputFormatV1");
+#endif
+
+/* Reports the format Vn_RenderHostOutput produces. outFormat->structSize must
+ * be set by the caller; a null pointer or a smaller struct is VN_INVALID_ARG.
+ * A session that is not VN_DEVICE_HOST returns VN_INVALID_CONFIG; an absent or
+ * failed engine returns VN_NOT_INITIALIZED. Logic thread only. */
+VnResult Vn_QueryHostOutputFormat(VnHostOutputFormatV1* outFormat);
+
+/* Writes frameCount frames of the final mix to interleavedOut, which must hold
+ * frameCount * channelCount floats. The engine renders whole internal blocks
+ * and carries unread frames to the next call, so every frame is delivered
+ * exactly once and the sample clock advances only through this call.
+ *
+ * This is the one entry exempt from the single-caller threading contract: it
+ * may run on a host audio thread concurrently with the logic thread. Only one
+ * render call may be in flight; an overlapping call returns VN_IN_USE.
+ * Rendering is admitted from a successful Vn_Init or Vn_Resume until
+ * Vn_Suspend or Vn_Term, both of which return only after an in-flight call
+ * has left. Outside that window, and in any other device mode, the call
+ * returns VN_NOT_INITIALIZED. A channelCount that differs from the session's
+ * is VN_INVALID_ARG. Every non-VN_OK result has filled the buffer with
+ * silence, except a null buffer or zero channelCount, which write nothing. */
+VnResult Vn_RenderHostOutput(float* interleavedOut, uint32_t frameCount,
+                             uint32_t channelCount);
 
 /* Stop the device (if any) and free everything. Valid while running,
  * suspended, or waiting to retry a failed resume. */

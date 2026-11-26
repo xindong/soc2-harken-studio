@@ -7,6 +7,7 @@
 
 #include <harken/ObjectId.h>
 #include "DeviceBackend.h"
+#include "HostBackend.h"
 #include "EngineFrontierOwnerLedger.h"
 #include "EnginePendingSelectionBatch.h"
 #include "EngineNativeVoiceSide.h"
@@ -7238,7 +7239,8 @@ public:
                 static_cast<std::uint32_t>(
                     projectGenerationInstallAckSideTable.size()),
                 &projectGenerationInstallAckRing, &originalSourceSubmissions),
-           nullBackend(mixer, resolved) {
+           nullBackend(mixer, resolved),
+           hostBackend(mixer, resolved) {
 #if HARKEN_ENGINE_DEV
         monitorPlaybackEvents.reserve(static_cast<std::size_t>(timelineArms.Capacity()) +
             playableInstances.Capacity());
@@ -15374,6 +15376,7 @@ public:
     TimelineExecutor timelineExecutor;
     MixerLoop mixer;
     NullBackend nullBackend;
+    HostBackend hostBackend;
     std::unique_ptr<TimelineServiceCoordinator> timelineService;
     // Logic-thread lifecycle state. The Engine and all render/content state
     // remain intact while the real device is absent and can be rebuilt.

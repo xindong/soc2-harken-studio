@@ -6867,6 +6867,7 @@ void TeardownEngine(Engine* engine) {
     if (!engine->config.nullDevice) {
         (void)StopRealDevice(*engine);
     } else {
+        engine->hostBackend.Revoke();
         engine->voices.DisableRenderWorkers();
     }
     engine->streamSeekHandoffs.CancelAllAfterAudioJoin();
@@ -111601,6 +111602,9 @@ VnResult Vn_Init(const VnConfig* config) {
     }
     harken::detail::g_engineOwner = engineOwner.release();
     harken::detail::g_engine = engine;
+    if (resolved.hostDevice) {
+        engine->hostBackend.Admit();
+    }
     return VN_OK;
 
     } catch (const std::bad_alloc&) {
@@ -111627,6 +111631,7 @@ VnResult Vn_Suspend(void) {
     // failure leaves a complete, retryable Engine with no live device.
     engine->suspended = true;
     if (engine->config.nullDevice) {
+        engine->hostBackend.Revoke();
         engine->voices.DisableRenderWorkers();
         engine->nullBackend.SetSuspended(true);
         return VN_OK;
@@ -111668,6 +111673,9 @@ VnResult Vn_Resume(void) {
         }
         engine->suspended = false;
         engine->nullBackend.SetSuspended(false);
+        if (engine->config.hostDevice) {
+            engine->hostBackend.Admit();
+        }
         return VN_OK;
     }
 
@@ -111713,6 +111721,32 @@ VnResult Vn_SetHostOutputMute(uint32_t mute01, uint32_t fadeMs) {
     }
     engine->device.SetHostOutputMute(mute01 != 0u, fadeMs);
     return VN_OK;
+}
+
+VnResult Vn_QueryHostOutputFormat(VnHostOutputFormatV1* outFormat) {
+    harken::Engine* engine = harken::detail::g_engine;
+    if (engine == nullptr || engine->callbackFatalSticky) {
+        return VN_NOT_INITIALIZED;
+    }
+    if (outFormat == nullptr ||
+        outFormat->structSize < sizeof(VnHostOutputFormatV1)) {
+        return VN_INVALID_ARG;
+    }
+    if (!engine->config.hostDevice) {
+        return VN_INVALID_CONFIG;
+    }
+    outFormat->sampleRate = engine->config.mixRate.SampleRate();
+    outFormat->channelCount = engine->config.deviceChannelCount;
+    outFormat->channelLayout = engine->config.deviceChannelLayout;
+    outFormat->blockFrames = engine->config.blockFrames;
+    outFormat->reserved0 = 0;
+    return VN_OK;
+}
+
+VnResult Vn_RenderHostOutput(float* interleavedOut, uint32_t frameCount,
+                             uint32_t channelCount) {
+    return harken::HostBackend::Render(interleavedOut, frameCount,
+                                       channelCount);
 }
 
 VnResult Vn_Term(void) {

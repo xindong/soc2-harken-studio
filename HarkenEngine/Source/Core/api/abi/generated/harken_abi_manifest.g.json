@@ -409,7 +409,8 @@
           ],
           "VnDeviceMode": [
             "VN_DEVICE_REAL",
-            "VN_DEVICE_NULL"
+            "VN_DEVICE_NULL",
+            "VN_DEVICE_HOST"
           ],
           "VnDynamicCapabilityFlags": [
             "VN_DYNAMIC_CAP_CONTROL_USES_BINDING",
@@ -1389,6 +1390,7 @@
           "VnVariableTicketQueryResultV1",
           "VnVariableQueryDescV1",
           "VnAbiVersionInfo",
+          "VnHostOutputFormatV1",
           "VnPackFormatVersionInfo",
           "VnVariableCatalogInfoV1",
           "VnVariableQueryResultV1",
@@ -2208,6 +2210,7 @@
           "backing": "u32",
           "edition": "core",
           "values": {
+            "VN_DEVICE_HOST": 2,
             "VN_DEVICE_NULL": 1,
             "VN_DEVICE_REAL": 0
           }
@@ -4425,6 +4428,38 @@
         {
           "callingConvention": "cdecl",
           "edition": "core",
+          "name": "Vn_QueryHostOutputFormat",
+          "parameters": [
+            {
+              "ctype": "VnHostOutputFormatV1*",
+              "name": "outFormat"
+            }
+          ],
+          "returnType": "VnResult"
+        },
+        {
+          "callingConvention": "cdecl",
+          "edition": "core",
+          "name": "Vn_RenderHostOutput",
+          "parameters": [
+            {
+              "ctype": "float*",
+              "name": "interleavedOut"
+            },
+            {
+              "ctype": "uint32_t",
+              "name": "frameCount"
+            },
+            {
+              "ctype": "uint32_t",
+              "name": "channelCount"
+            }
+          ],
+          "returnType": "VnResult"
+        },
+        {
+          "callingConvention": "cdecl",
+          "edition": "core",
           "name": "Vn_SetHostOutputMute",
           "parameters": [
             {
@@ -6533,6 +6568,7 @@
         "Vn_QueryActionPlaybackReadiness",
         "Vn_QueryActionSeek",
         "Vn_QueryActionStep",
+        "Vn_QueryHostOutputFormat",
         "Vn_QueryPackFormatVersion",
         "Vn_QueryStreamSource",
         "Vn_QueryVariable",
@@ -6554,6 +6590,7 @@
         "Vn_RemoteGetStatus",
         "Vn_RemoteStart",
         "Vn_RemoteStop",
+        "Vn_RenderHostOutput",
         "Vn_ReparentBus",
         "Vn_ReplaceAttenuation",
         "Vn_ReplaceBinding",
@@ -11302,6 +11339,73 @@
             }
           ],
           "size": 32
+        },
+        "VnHostOutputFormatV1": {
+          "alignment": 4,
+          "edition": "core",
+          "fields": [
+            {
+              "alignment": 4,
+              "name": "structSize",
+              "offset": 0,
+              "shape": {
+                "kind": "scalar",
+                "type": "u32"
+              },
+              "size": 4
+            },
+            {
+              "alignment": 4,
+              "name": "sampleRate",
+              "offset": 4,
+              "shape": {
+                "kind": "scalar",
+                "type": "u32"
+              },
+              "size": 4
+            },
+            {
+              "alignment": 4,
+              "name": "channelCount",
+              "offset": 8,
+              "shape": {
+                "kind": "scalar",
+                "type": "u32"
+              },
+              "size": 4
+            },
+            {
+              "alignment": 4,
+              "name": "channelLayout",
+              "offset": 12,
+              "shape": {
+                "kind": "scalar",
+                "type": "u32"
+              },
+              "size": 4
+            },
+            {
+              "alignment": 4,
+              "name": "blockFrames",
+              "offset": 16,
+              "shape": {
+                "kind": "scalar",
+                "type": "u32"
+              },
+              "size": 4
+            },
+            {
+              "alignment": 4,
+              "name": "reserved0",
+              "offset": 20,
+              "shape": {
+                "kind": "scalar",
+                "type": "u32"
+              },
+              "size": 4
+            }
+          ],
+          "size": 24
         },
         "VnInitPackInspectReport": {
           "alignment": 8,
@@ -25582,6 +25686,15 @@
             "source": "default",
             "unknownSize": "reject"
           },
+          "VnHostOutputFormatV1": {
+            "acceptedSizes": [
+              24
+            ],
+            "currentSize": 24,
+            "mode": "exact-current",
+            "source": "default",
+            "unknownSize": "reject"
+          },
           "VnInitPackInspectReport": {
             "acceptedSizes": [
               80
@@ -26451,7 +26564,7 @@
       }
     }
   },
-  "contractSha256": "efd650ca37c871bf82c7d79809bc1217a27db0d838e3e114bf2286044b7119ba",
+  "contractSha256": "18f33218561e5baea367b5b7bf9c12b273f28fdcb8d2e620fa6254e207341e7a",
   "kind": "harken-contract-suite-manifest",
   "schemaVersion": 1
 }

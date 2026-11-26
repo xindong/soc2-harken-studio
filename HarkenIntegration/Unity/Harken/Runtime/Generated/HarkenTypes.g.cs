@@ -248,6 +248,7 @@ namespace Harken
     {
         VN_DEVICE_REAL = 0,
         VN_DEVICE_NULL = 1,
+        VN_DEVICE_HOST = 2,
     }
 
     internal enum VnPcmLayout : uint

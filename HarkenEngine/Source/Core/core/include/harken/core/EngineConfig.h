@@ -139,6 +139,7 @@ struct EngineConfig {
     std::uint32_t fxSlotsPerVoice = 8;
     std::uint32_t arenaBytes = 2u << 20;
     bool nullDevice = true;
+    bool hostDevice = false;
     std::uint32_t maxBuses = 32;
     std::uint32_t commandQueueDepth = 256;
     // Most control commands one MixQuantum will apply. The drain used to run

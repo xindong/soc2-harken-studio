@@ -293,15 +293,23 @@ VnResult ResolveConfigForInitialDevice(const VnConfig* config,
     if (hasCompressorAndDynamicFields && config->reserved9 != 0) {
         return VN_INVALID_ARG;
     }
+    const bool hostDevice = (config->deviceMode == VN_DEVICE_HOST);
     if (config->deviceMode != VN_DEVICE_REAL &&
-        config->deviceMode != VN_DEVICE_NULL) {
+        config->deviceMode != VN_DEVICE_NULL && !hostDevice) {
+        return VN_INVALID_CONFIG;
+    }
+    if (hostDevice &&
+        (config->sampleRate == 0 || !hasMultichannelFields ||
+         config->deviceChannelLayout == VN_CHANNEL_LAYOUT_DEFAULT ||
+         config->renderWorkerCount != 0)) {
         return VN_INVALID_CONFIG;
     }
 
     EngineConfig resolved;
     std::uint32_t renderVoiceCapacity = resolved.voiceCapacity.Render();
     std::uint32_t virtualVoiceCapacity = resolved.voiceCapacity.Virtual();
-    resolved.nullDevice = (config->deviceMode == VN_DEVICE_NULL);
+    resolved.nullDevice = (config->deviceMode != VN_DEVICE_REAL);
+    resolved.hostDevice = hostDevice;
     if (config->sampleRate != 0) {
         resolved.mixRate = ResolvedMixRateConfig(
             config->sampleRate, MixRateResolution::ExplicitRequest);

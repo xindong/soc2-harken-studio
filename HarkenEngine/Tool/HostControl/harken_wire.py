@@ -6884,6 +6884,34 @@ TABLE_JSON = r'''
         ]
       ]
     },
+    "VnHostOutputFormatV1": {
+      "fields": [
+        [
+          "structSize",
+          "u32"
+        ],
+        [
+          "sampleRate",
+          "u32"
+        ],
+        [
+          "channelCount",
+          "u32"
+        ],
+        [
+          "channelLayout",
+          "u32"
+        ],
+        [
+          "blockFrames",
+          "u32"
+        ],
+        [
+          "reserved0",
+          "u32"
+        ]
+      ]
+    },
     "VnPackFormatVersionInfo": {
       "fields": [
         [
@@ -9739,6 +9767,39 @@ TABLE_JSON = r'''
       "params": []
     },
     {
+      "name": "Vn_QueryHostOutputFormat",
+      "note": "public Runtime API; host-owned output format. Not part of the remote wire protocol (no opcode).",
+      "params": [
+        {
+          "name": "outFormat",
+          "ctype": "VnHostOutputFormatV1*",
+          "wire": "outstruct",
+          "type": "VnHostOutputFormatV1"
+        }
+      ]
+    },
+    {
+      "name": "Vn_RenderHostOutput",
+      "note": "public Runtime API; host audio thread pulls mixed PCM into process-local memory. Not part of the remote wire protocol (no opcode).",
+      "params": [
+        {
+          "name": "interleavedOut",
+          "ctype": "float*",
+          "wire": "out"
+        },
+        {
+          "name": "frameCount",
+          "ctype": "uint32_t",
+          "wire": "u32"
+        },
+        {
+          "name": "channelCount",
+          "ctype": "uint32_t",
+          "wire": "u32"
+        }
+      ]
+    },
+    {
       "name": "Vn_SetHostOutputMute",
       "note": "public Runtime API; the serving host owns its device output. Not part of the remote wire protocol (no opcode).",
       "params": [
@@ -12327,7 +12388,8 @@ TABLE_JSON = r'''
         "backing": "u32",
         "values": {
           "VN_DEVICE_REAL": 0,
-          "VN_DEVICE_NULL": 1
+          "VN_DEVICE_NULL": 1,
+          "VN_DEVICE_HOST": 2
         }
       },
       "VnPcmLayout": {

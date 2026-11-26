@@ -66,6 +66,7 @@ endif()
 set(HARKEN_CORE_SOURCES
     ${HARKEN_CORE_DIR}/api/src/PackInspection.cpp
     ${HARKEN_CORE_DIR}/api/src/DeviceBackend.cpp
+    ${HARKEN_CORE_DIR}/api/src/HostBackend.cpp
     ${HARKEN_CORE_DIR}/api/src/RealDeviceInitStage.cpp
     ${HARKEN_CORE_DIR}/api/src/MiniaudioImpl.cpp
     ${HARKEN_CORE_DIR}/api/src/HarkenApi.cpp

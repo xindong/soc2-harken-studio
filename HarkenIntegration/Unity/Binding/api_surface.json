@@ -2054,7 +2054,8 @@
         "VnMonitor",
         "VnPlaybackReadiness",
         "VnActionPlaybackReadiness",
-        "VnPreview"
+        "VnPreview",
+        "VnHostOutputFormat"
       ],
       "constants": [
         "VN_MONITOR_",
@@ -2063,7 +2064,9 @@
       "functions": [
         "Vn_Monitor",
         "Vn_QueryActionPlaybackReadiness",
-        "VnPreview_"
+        "VnPreview_",
+        "Vn_QueryHostOutputFormat",
+        "Vn_RenderHostOutput"
       ],
       "results": [
         "VN_MONITOR_"

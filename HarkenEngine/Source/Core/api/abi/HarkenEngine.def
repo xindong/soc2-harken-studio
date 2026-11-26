@@ -41,6 +41,7 @@ EXPORTS
     Vn_QueryActionPlaybackReadiness
     Vn_QueryActionSeek
     Vn_QueryActionStep
+    Vn_QueryHostOutputFormat
     Vn_QueryPackFormatVersion
     Vn_QueryStreamSource
     Vn_QueryVariable
@@ -52,6 +53,7 @@ EXPORTS
     Vn_RegisterStreamFile
     Vn_ReleaseActionFiring
     Vn_ReleaseActionSeek
+    Vn_RenderHostOutput
     Vn_ReparentBus
     Vn_ReplaceAttenuation
     Vn_ReplaceBinding

@@ -1665,6 +1665,23 @@
         "wire": "u32"
       }
     ],
+    "Vn_QueryHostOutputFormat": [
+      {
+        "wire": "outstruct",
+        "type": "VnHostOutputFormatV1"
+      }
+    ],
+    "Vn_RenderHostOutput": [
+      {
+        "wire": "out"
+      },
+      {
+        "wire": "u32"
+      },
+      {
+        "wire": "u32"
+      }
+    ],
     "Vn_SetHostOutputMute": [
       {
         "wire": "u32"

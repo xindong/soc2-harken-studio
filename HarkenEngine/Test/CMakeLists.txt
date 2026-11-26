@@ -98,6 +98,7 @@ add_executable(harken_runtime_tests
     UnitTest/AllocationProbe.cpp
     UnitTest/AbiExceptionFirewallSweepTest.cpp
     UnitTest/AbiVintageContractTest.cpp
+    UnitTest/HostRenderTest.cpp
     UnitTest/LifecycleTest.cpp
     UnitTest/MixRateConfigTest.cpp
     UnitTest/BusTreeTest.cpp
@@ -488,6 +489,7 @@ add_executable(harken_release_runtime_tests
     UnitTest/ImmediateActionLaneTest.cpp
     UnitTest/JsonReaderTest.cpp
     UnitTest/KnownCompletionTest.cpp
+    UnitTest/HostRenderTest.cpp
     UnitTest/LifecycleTest.cpp
     UnitTest/LogRingTest.cpp
     UnitTest/LogicCommitBundleTest.cpp
