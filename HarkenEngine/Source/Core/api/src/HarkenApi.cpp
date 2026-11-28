@@ -5,6 +5,7 @@
 
 #include "Engine.h"
 #include "BusBindingSourceStamp.h"
+#include "CallbackByteSource.h"
 #include "EngineNativeBackingEnvelope.h"
 #include "RealDeviceInitStage.h"
 #include "ActionAdmission.h"
@@ -113124,35 +113125,7 @@ VnResult Vn_BeginStreamSource(VnSoundId soundId, std::uint32_t mode,
         harken::StreamManager::StreamFacts previous;
         if (mode == VN_STREAM_SOURCE_REPLACE && !engine->streams.FindFile(soundId, &previous))
             return engine->streams.WorkerState() == harken::StreamWorkerState::Ready ? VN_UNKNOWN_ID : VN_DEVICE_ERROR;
-        class CallbackSource final : public harken::StreamByteSource {
-        public:
-            VnByteSourceDescV1 desc;
-            std::atomic<bool> armed{false};
-            explicit CallbackSource(const VnByteSourceDescV1& input) : desc(input) {}
-            ~CallbackSource() override {
-                if (armed.load(std::memory_order_acquire)) {
-                    try { desc.release(desc.userData); } catch (...) {}
-                }
-            }
-            std::uint64_t ByteCount() const noexcept override { return desc.byteLength; }
-            static std::uint32_t IsCancelled(const void* context) {
-                return static_cast<const harken::StreamReadCancellation*>(context)->IsCancelled() ? 1u : 0u;
-            }
-            harken::StreamReadResult ReadAt(std::uint64_t offset, void* destination, std::size_t count,
-                harken::StreamReadCancellation cancellation) const override {
-                if (cancellation.IsCancelled()) return {harken::StreamReadStatus::Cancelled, 0};
-                VnReadCancellationViewV1 view{sizeof(view), 0, &cancellation, &IsCancelled};
-                std::uint32_t read = 0;
-                try {
-                    const auto requested = static_cast<std::uint32_t>(std::min<std::size_t>(count, UINT32_MAX));
-                    const auto result = desc.readAt(desc.userData, offset, destination, requested, &read, &view);
-                    if (cancellation.IsCancelled() || result == VN_BYTE_READ_CANCELLED)
-                        return {harken::StreamReadStatus::Cancelled, 0};
-                    if (result != VN_BYTE_READ_OK || read > requested) return {};
-                    return {harken::StreamReadStatus::Ok, read};
-                } catch (...) { return {}; }
-            }
-        };
+        using CallbackSource = harken::detail::CallbackByteSource;
         auto adapter = std::make_shared<CallbackSource>(*source);
         harken::StreamManager::SourceToken token;
         const auto result = engine->streams.BeginSource(soundId, adapter, mode == VN_STREAM_SOURCE_REPLACE,
@@ -127387,6 +127360,24 @@ VnResult ResolveUnderContainmentRoot(const char* rootUtf8, const char* locator,
     return VN_OK;
 }
 
+constexpr std::uint32_t kPackLoadFlagByteSource = 0x80000000u;
+
+struct PackByteSourceCall {
+    PackByteSourceCall() noexcept;
+    ~PackByteSourceCall();
+    PackByteSourceCall(const PackByteSourceCall&) = delete;
+    PackByteSourceCall& operator=(const PackByteSourceCall&) = delete;
+    void Arm() noexcept;
+
+    PackByteSourceCall* previous;
+    std::vector<std::pair<const VnByteSourceDescV1*,
+                          std::shared_ptr<detail::CallbackByteSource>>> sources;
+};
+
+PackByteSourceCall* g_packByteSourceCall = nullptr;
+
+std::shared_ptr<const StreamByteSource> ResolvePackByteSource(const VnPackLoadDesc& desc);
+
 VnResult ResolveRootUtf8Path(const VnPackLoadDesc& desc, std::string* outResolved) {
     if (outResolved == nullptr || desc.utf8ContainmentRoot == nullptr ||
         desc.utf8Path == nullptr) {
@@ -127431,7 +127422,7 @@ VnResult ResolveRootUtf8Path(const VnPackLoadDesc& desc, std::string* outResolve
 const char* CanonicalPackJournalPath(const VnPackLoadDesc& load,
                                      std::string* storage) {
     if (storage == nullptr ||
-        (load.flags & VN_PACK_LOAD_FLAG_PROVIDER) != 0) {
+        (load.flags & (VN_PACK_LOAD_FLAG_PROVIDER | kPackLoadFlagByteSource)) != 0) {
         return nullptr;
     }
     if (load.utf8Path != nullptr && load.utf8Path[0] != '\0') {
@@ -127460,6 +127451,38 @@ VnResult ResolveCanonicalFilePath(const VnPackLoadDesc& desc, std::string* resol
 }
 
 } // namespace
+namespace {
+
+PackByteSourceCall::PackByteSourceCall() noexcept : previous(g_packByteSourceCall) {
+    g_packByteSourceCall = this;
+}
+
+PackByteSourceCall::~PackByteSourceCall() {
+    g_packByteSourceCall = previous;
+}
+
+void PackByteSourceCall::Arm() noexcept {
+    for (const auto& entry : sources) {
+        entry.second->armed.store(true, std::memory_order_release);
+    }
+}
+
+std::shared_ptr<const StreamByteSource> ResolvePackByteSource(const VnPackLoadDesc& desc) {
+    if ((desc.flags & kPackLoadFlagByteSource) == 0 || g_packByteSourceCall == nullptr ||
+        desc.providerUserData == nullptr) {
+        return nullptr;
+    }
+    const auto* key = static_cast<const VnByteSourceDescV1*>(desc.providerUserData);
+    for (const auto& entry : g_packByteSourceCall->sources) {
+        if (entry.first == key) return entry.second;
+    }
+    auto source = std::make_shared<detail::CallbackByteSource>(*key);
+    g_packByteSourceCall->sources.emplace_back(key, source);
+    return source;
+}
+
+} // namespace
+
 VnResult AcquireCanonicalBytes(const VnPackLoadDesc& desc,
                                PackTable::AlignedBuffer* owned,
                                VnPackByteSpan* span, bool* releaseSpan,
@@ -127469,6 +127492,26 @@ VnResult AcquireCanonicalBytes(const VnPackLoadDesc& desc,
     span->reserved0 = 0;
     span->bytes = nullptr;
     span->byteCount = 0;
+
+    if ((desc.flags & kPackLoadFlagByteSource) != 0) {
+        const auto source = ResolvePackByteSource(desc);
+        if (source == nullptr) return VN_INVALID_ARG;
+        const std::uint64_t byteCount = source->ByteCount();
+        if (byteCount == 0 || byteCount > SIZE_MAX) return VN_PACK_PROVIDER_FAILED;
+        if (byteCount > maxBytes) return VN_PACK_RESIDENT_CAPACITY;
+        std::uint8_t* buffer = static_cast<std::uint8_t*>(::operator new[](
+            static_cast<std::size_t>(byteCount),
+            std::align_val_t{HK_PACK_BLOB_ALIGN}, std::nothrow));
+        if (buffer == nullptr) return VN_DEVICE_ERROR;
+        owned->reset(buffer);
+        if (ReadStreamBytes(*source, 0, buffer, static_cast<std::size_t>(byteCount), {}) !=
+            StreamReadStatus::Ok) {
+            return VN_PACK_PROVIDER_FAILED;
+        }
+        span->bytes = buffer;
+        span->byteCount = byteCount;
+        return VN_OK;
+    }
 
     if ((desc.flags & VN_PACK_LOAD_FLAG_PROVIDER) != 0) {
         if (desc.provide == nullptr) {
@@ -127904,10 +127947,13 @@ VnResult ValidateCanonicalPackSetMember(
     const bool provider =
         (member.flags & VN_CANONICAL_PACK_SET_MEMBER_PROVIDER) != 0;
     const bool root = (member.flags & VN_CANONICAL_PACK_SET_MEMBER_ROOT) != 0;
+    const bool byteSource =
+        (member.flags & VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE) != 0;
     if ((member.flags &
          ~(VN_CANONICAL_PACK_SET_MEMBER_PROVIDER |
-           VN_CANONICAL_PACK_SET_MEMBER_ROOT)) != 0 ||
-        (provider && root)) {
+           VN_CANONICAL_PACK_SET_MEMBER_ROOT |
+           VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE)) != 0 ||
+        (provider && root) || (byteSource && (provider || root))) {
         return VN_INVALID_ARG;
     }
     const std::uint32_t expectedKind =
@@ -127919,6 +127965,18 @@ VnResult ValidateCanonicalPackSetMember(
     if (provider) {
         if (member.utf8Path != nullptr || member.utf8ContainmentRoot != nullptr ||
             member.provide == nullptr || member.release == nullptr) {
+            return VN_INVALID_ARG;
+        }
+        return VN_OK;
+    }
+    if (byteSource) {
+        const auto* source =
+            static_cast<const VnByteSourceDescV1*>(member.providerUserData);
+        if (member.utf8Path != nullptr || member.utf8ContainmentRoot != nullptr ||
+            member.provide != nullptr || member.release != nullptr ||
+            source == nullptr || source->structSize != sizeof(VnByteSourceDescV1) ||
+            source->flags != 0 || source->byteLength == 0 ||
+            source->readAt == nullptr || source->release == nullptr) {
             return VN_INVALID_ARG;
         }
         return VN_OK;
@@ -127953,6 +128011,8 @@ VnPackLoadDesc MemberToLoadDesc(const VnCanonicalPackSetMemberV1& member) {
         load.flags = VN_PACK_LOAD_FLAG_PROVIDER;
     } else if ((member.flags & VN_CANONICAL_PACK_SET_MEMBER_ROOT) != 0) {
         load.flags = VN_PACK_LOAD_FLAG_ROOT;
+    } else if ((member.flags & VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE) != 0) {
+        load.flags = kPackLoadFlagByteSource;
     }
     return load;
 }
@@ -129153,15 +129213,20 @@ void CollectCanonicalSetDemand(Engine& engine, const VnCanonicalPackSetActivatio
         }
         const auto load = MemberToLoadDesc(desc.members[i]);
         std::string path;
+        const auto byteSource = ResolvePackByteSource(load);
         if ((load.flags & VN_PACK_LOAD_FLAG_PROVIDER) != 0 || engine.trace != nullptr ||
-            ResolveCanonicalFilePath(load, &path) != VN_OK)
+            (byteSource == nullptr && ResolveCanonicalFilePath(load, &path) != VN_OK))
             continue;
         PackCanonicalImage image;
         std::vector<PCMRegistry::PreparedPackSamples> samples;
         detail::PackDecodeCharge sampleStaging(budget);
         std::uint64_t byteCount = 0, hash = 0;
-        if (ReadPackCanonicalFile(path.c_str(), engine.registry, &image, &samples, &byteCount,
-                &hash, UINT64_MAX, {}, nullptr, nullptr, budget, &sampleStaging, nullptr, true) == VN_OK) {
+        const auto read = byteSource != nullptr
+            ? ReadPackCanonicalSource(byteSource, engine.registry, &image, &samples, &byteCount,
+                  &hash, UINT64_MAX, {}, nullptr, budget, &sampleStaging, nullptr, true)
+            : ReadPackCanonicalFile(path.c_str(), engine.registry, &image, &samples, &byteCount,
+                  &hash, UINT64_MAX, {}, nullptr, nullptr, budget, &sampleStaging, nullptr, true);
+        if (read == VN_OK) {
             (*rows)[i] = std::move(image.soundStreaming);
             (*collected)[i] = 1;
         }
@@ -129182,8 +129247,11 @@ VnResult AcquireCanonicalSetMember(Engine& engine, const VnPackLoadDesc& load,
     CanonicalByteSpanGuard guard{load};
     if ((load.flags & VN_PACK_LOAD_FLAG_PROVIDER) == 0 && engine.trace == nullptr) {
         std::string path;
-        const auto rooted = ResolveCanonicalFilePath(load, &path);
-        if (rooted != VN_OK) return rooted;
+        const auto byteSource = ResolvePackByteSource(load);
+        if (byteSource == nullptr) {
+            const auto rooted = ResolveCanonicalFilePath(load, &path);
+            if (rooted != VN_OK) return rooted;
+        }
         detail::PackDecodeCharge candidateScratch(budget);
         std::size_t candidateCount = 0;
         for (const auto& member : previous) candidateCount += member.samples.size();
@@ -129192,9 +129260,13 @@ VnResult AcquireCanonicalSetMember(Engine& engine, const VnPackLoadDesc& load,
         for (const auto& member : previous)
             for (const auto& samples : member.samples) candidates.push_back(&samples);
         bool retry = false;
-        parsed = ReadPackCanonicalFile(path.c_str(), engine.registry, &out->image, &out->samples,
-            &out->byteCount, &out->hash, budget->limit - budget->live,
-            candidates, &retry, nullptr, budget, &out->sampleStaging, demand);
+        parsed = byteSource != nullptr
+            ? ReadPackCanonicalSource(byteSource, engine.registry, &out->image, &out->samples,
+                  &out->byteCount, &out->hash, budget->limit - budget->live,
+                  candidates, &retry, budget, &out->sampleStaging, demand)
+            : ReadPackCanonicalFile(path.c_str(), engine.registry, &out->image, &out->samples,
+                  &out->byteCount, &out->hash, budget->limit - budget->live,
+                  candidates, &retry, nullptr, budget, &out->sampleStaging, demand);
         if (parsed == VN_OK) {
             // Storage was chosen from definitions collected earlier; a changed
             // artifact could have changed them.
@@ -130412,7 +130484,8 @@ void JournalSuccessfulCanonicalPackSetActivation(
     for (std::uint32_t i = 0; i < desc.memberCount; ++i) {
         const VnCanonicalPackSetMemberV1& member = desc.members[i];
         const bool provider =
-            (member.flags & VN_CANONICAL_PACK_SET_MEMBER_PROVIDER) != 0;
+            (member.flags & (VN_CANONICAL_PACK_SET_MEMBER_PROVIDER |
+                             VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE)) != 0;
         const bool root = (member.flags & VN_CANONICAL_PACK_SET_MEMBER_ROOT) != 0;
         const std::uint32_t providerTag = provider ? 2u : (root ? 1u : 0u);
         trace.U32(member.structSize)
@@ -130446,12 +130519,37 @@ void JournalSuccessfulCanonicalPackSetActivation(
 }  // namespace
 
 
+VnResult ActivateCanonicalPackSetBody(
+    Engine& engine, const VnCanonicalPackSetActivationDescV1* descriptor,
+    VnCanonicalPackSetActivationReportV1* outReport,
+    const std::vector<std::uint32_t>* operations,
+    std::vector<std::uint64_t>* traceResources,
+    bool* traceInputMissing);
+
 VnResult ActivateCanonicalPackSetImpl(
     Engine& engine, const VnCanonicalPackSetActivationDescV1* descriptor,
     VnCanonicalPackSetActivationReportV1* outReport,
     const std::vector<std::uint32_t>* operations = nullptr,
     std::vector<std::uint64_t>* traceResources = nullptr,
     bool* traceInputMissing = nullptr) {
+    PackByteSourceCall byteSources;
+    const VnResult result = ActivateCanonicalPackSetBody(
+        engine, descriptor, outReport, operations, traceResources, traceInputMissing);
+    if (result == VN_OK) {
+        for (std::uint32_t i = 0; i < descriptor->memberCount; ++i) {
+            (void)ResolvePackByteSource(MemberToLoadDesc(descriptor->members[i]));
+        }
+        byteSources.Arm();
+    }
+    return result;
+}
+
+VnResult ActivateCanonicalPackSetBody(
+    Engine& engine, const VnCanonicalPackSetActivationDescV1* descriptor,
+    VnCanonicalPackSetActivationReportV1* outReport,
+    const std::vector<std::uint32_t>* operations,
+    std::vector<std::uint64_t>* traceResources,
+    bool* traceInputMissing) {
     VariableOperationScope variableOperation(&engine);
     if (descriptor == nullptr || outReport == nullptr ||
         descriptor->structSize != sizeof(VnCanonicalPackSetActivationDescV1) ||

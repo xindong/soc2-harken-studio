@@ -13250,6 +13250,10 @@ TABLE_JSON = r'''
         "type": "u32",
         "value": 2
       },
+      "VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE": {
+        "type": "u32",
+        "value": 4
+      },
       "VN_PACK_MEMBER_KEEP": {
         "type": "u32",
         "value": 0

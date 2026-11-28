@@ -1403,6 +1403,17 @@ typedef struct VnPackLoadDesc {
 
 #define VN_CANONICAL_PACK_SET_MEMBER_PROVIDER ((uint32_t)0x00000001u)
 #define VN_CANONICAL_PACK_SET_MEMBER_ROOT ((uint32_t)0x00000002u)
+/* The member is read by offset instead of delivered whole. providerUserData
+ * points to a VnByteSourceDescV1 that the engine copies during the call;
+ * utf8Path, utf8ContainmentRoot, provide and release must be null, and the flag
+ * excludes PROVIDER and ROOT. Sounds marked streamed keep reading from the
+ * source while the pack is loaded, from engine I/O threads, under the
+ * VnByteSourceReadAtFn rules. When the activation returns VN_OK the engine owns
+ * every byte source of the call and invokes its release exactly once after the
+ * last reader is gone, possibly before returning; on any other result release
+ * is not invoked and the caller keeps the source. While a trace is recording,
+ * the whole artifact is read into memory as with PROVIDER. */
+#define VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE ((uint32_t)0x00000004u)
 #define VN_CANONICAL_PACK_SET_MEMBER_INIT ((uint32_t)2u)
 #define VN_CANONICAL_PACK_SET_MEMBER_CONTENT ((uint32_t)3u)
 #define VN_CANONICAL_PACK_SET_MEMBER_RESULT_RETAINED ((uint32_t)0x00000001u)

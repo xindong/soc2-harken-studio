@@ -196,6 +196,7 @@
           "VN_PACK_UNLOAD_REFUSE_IF_USED",
           "VN_CANONICAL_PACK_SET_MEMBER_PROVIDER",
           "VN_CANONICAL_PACK_SET_MEMBER_ROOT",
+          "VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE",
           "VN_PACK_MEMBER_KEEP",
           "VN_PACK_MEMBER_CONTENT",
           "VN_PACK_PREVIEW_UNSUPPORTED",
@@ -1467,6 +1468,11 @@
           "edition": "core",
           "type": "i32",
           "value": 0
+        },
+        "VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE": {
+          "edition": "core",
+          "type": "u32",
+          "value": 4
         },
         "VN_CANONICAL_PACK_SET_MEMBER_CONTENT": {
           "edition": "core",
@@ -26564,7 +26570,7 @@
       }
     }
   },
-  "contractSha256": "18f33218561e5baea367b5b7bf9c12b273f28fdcb8d2e620fa6254e207341e7a",
+  "contractSha256": "3bc5a7094ecf96ac00a667bdf56727c6f82864a37d266eb5867ac94e2e1b79cd",
   "kind": "harken-contract-suite-manifest",
   "schemaVersion": 1
 }

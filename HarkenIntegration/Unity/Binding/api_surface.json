@@ -2059,7 +2059,8 @@
       ],
       "constants": [
         "VN_MONITOR_",
-        "VN_PREVIEW_"
+        "VN_PREVIEW_",
+        "VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE"
       ],
       "functions": [
         "Vn_Monitor",

@@ -26,6 +26,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -3587,6 +3588,143 @@ TEST(CanonicalPackSetActivate, StreamedPackMediaPlaysResidentSamplesWithoutResid
     }
     EXPECT_TRUE(source.expired());
     EXPECT_EQ(0u, engine->registry.CookieOf(kSound));
+}
+
+namespace packstream {
+
+struct MemoryByteSource {
+    std::vector<std::uint8_t> bytes;
+    std::atomic<std::uint32_t> releases{0};
+    std::atomic<std::uint64_t> largestRead{0};
+    bool fail = false;
+
+    static std::int32_t ReadAt(void* userData, std::uint64_t offset, void* destination,
+        std::uint32_t count, std::uint32_t* outRead, const VnReadCancellationViewV1*) {
+        auto* self = static_cast<MemoryByteSource*>(userData);
+        if (self->fail || offset > self->bytes.size() || count > self->bytes.size() - offset)
+            return VN_BYTE_READ_IO_ERROR;
+        std::memcpy(destination, self->bytes.data() + offset, count);
+        *outRead = count;
+        std::uint64_t seen = self->largestRead.load();
+        while (seen < count && !self->largestRead.compare_exchange_weak(seen, count)) {}
+        return VN_BYTE_READ_OK;
+    }
+    static void Release(void* userData) {
+        static_cast<MemoryByteSource*>(userData)->releases.fetch_add(1);
+    }
+    VnByteSourceDescV1 Desc() {
+        VnByteSourceDescV1 desc{};
+        desc.structSize = sizeof(desc);
+        desc.byteLength = bytes.size();
+        desc.userData = this;
+        desc.readAt = &ReadAt;
+        desc.release = &Release;
+        return desc;
+    }
+};
+
+VnCanonicalPackSetMemberV2 ByteSourceMember(std::uint64_t id, bool init,
+                                            const VnByteSourceDescV1* source) {
+    auto row = Member(id, init, nullptr);
+    row.source.flags = VN_CANONICAL_PACK_SET_MEMBER_BYTE_SOURCE;
+    row.source.providerUserData = const_cast<VnByteSourceDescV1*>(source);
+    return row;
+}
+
+} // namespace packstream
+
+TEST(CanonicalPackSetActivate, ByteSourceMemberStreamsByOffsetAndReleasesOnce) {
+    using namespace packstream;
+    const auto samples = PlanarSignal(1.0f);
+    const auto resident = ResidentReference("pack-byte-source-resident", samples);
+    MemoryByteSource init, content;
+    init.bytes = Build(true, PackId("Init"));
+    content.bytes = BuildSoundContent(PathSet::ContentId(), 1, true, samples);
+    auto config = StreamConfig();
+    config.maxPackDecodeStagingBytes = content.bytes.size() - 1024;
+    EngineSession session(config);
+    ASSERT_EQ(VN_OK, session.InitResult());
+    auto* engine = session.Engine();
+    const auto initDesc = init.Desc();
+    const auto contentDesc = content.Desc();
+    std::vector<VnCanonicalPackSetMemberV2> members = {
+        ByteSourceMember(PackId("Init"), true, &initDesc),
+        ByteSourceMember(PathSet::ContentId(), false, &contentDesc)};
+    VnCanonicalPackSetActivationReportV1 report{};
+    ASSERT_EQ(VN_OK, Activate(members, report));
+    EXPECT_EQ(1u, init.releases.load());
+    EXPECT_EQ(0u, content.releases.load());
+    EXPECT_LT(content.largestRead.load(), content.bytes.size());
+    {
+        const auto reference = engine->registry.ReferenceOf(kSound, engine->registry.CookieOf(kSound));
+        ASSERT_TRUE(reference.Valid());
+        EXPECT_FALSE(reference.View().Valid());
+        ASSERT_NE(nullptr, reference.Range());
+        EXPECT_EQ(kFrames, reference.Range()->frameCount);
+    }
+    const auto streamed = PostAndCapture(engine, kBlocks);
+    ExpectSameAudible(resident, streamed, kFrames);
+
+    VnCanonicalPackSetUnloadDescV1 unload{};
+    unload.structSize = sizeof(unload);
+    unload.expectedInitHandle = report.initHandle;
+    unload.baseSetRevision = report.resultSetRevision;
+    unload.unloadRevision = report.resultSetRevision + 1;
+    ASSERT_EQ(VN_OK, Vn_UnloadCanonicalPackSetV1(&unload));
+    for (int pass = 0; pass < 200 && content.releases.load() == 0; ++pass) {
+        engine->streams.SyncServe();
+        ASSERT_EQ(VN_OK, Vn_Update());
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(1u, content.releases.load());
+    EXPECT_EQ(1u, init.releases.load());
+}
+
+TEST(CanonicalPackSetActivate, ByteSourceMemberRefusalsLeaveOwnershipWithTheCaller) {
+    using namespace packstream;
+    MemoryByteSource init, content;
+    init.bytes = Build(true, PackId("Init"));
+    content.bytes = BuildSoundContent(PathSet::ContentId(), 1, true, PlanarSignal(1.0f));
+    EngineSession session(StreamConfig());
+    ASSERT_EQ(VN_OK, session.InitResult());
+    const auto initDesc = init.Desc();
+    auto contentDesc = content.Desc();
+    const auto members = [&] {
+        return std::vector<VnCanonicalPackSetMemberV2>{
+            ByteSourceMember(PackId("Init"), true, &initDesc),
+            ByteSourceMember(PathSet::ContentId(), false, &contentDesc)};
+    };
+    VnCanonicalPackSetActivationReportV1 report{};
+
+    auto mixed = members();
+    mixed[1].source.flags |= VN_CANONICAL_PACK_SET_MEMBER_PROVIDER;
+    EXPECT_EQ(VN_INVALID_ARG, Activate(mixed, report));
+    auto withPath = members();
+    withPath[1].source.utf8Path = "Content.pack";
+    EXPECT_EQ(VN_INVALID_ARG, Activate(withPath, report));
+    auto noSource = members();
+    noSource[1].source.providerUserData = nullptr;
+    EXPECT_EQ(VN_INVALID_ARG, Activate(noSource, report));
+    contentDesc.byteLength = 0;
+    auto empty = members();
+    EXPECT_EQ(VN_INVALID_ARG, Activate(empty, report));
+    contentDesc = content.Desc();
+    contentDesc.release = nullptr;
+    auto noRelease = members();
+    EXPECT_EQ(VN_INVALID_ARG, Activate(noRelease, report));
+
+    contentDesc = content.Desc();
+    content.fail = true;
+    auto failing = members();
+    EXPECT_NE(VN_OK, Activate(failing, report));
+    EXPECT_EQ(0u, init.releases.load());
+    EXPECT_EQ(0u, content.releases.load());
+
+    content.fail = false;
+    auto good = members();
+    ASSERT_EQ(VN_OK, Activate(good, report));
+    EXPECT_EQ(1u, init.releases.load());
+    EXPECT_EQ(0u, content.releases.load());
 }
 
 TEST(CanonicalPackSetActivate, StreamedPackVoiceKeepsOriginalSourceAcrossNewRevision) {

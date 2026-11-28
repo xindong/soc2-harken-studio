@@ -405,6 +405,17 @@ VnResult ReadPackCanonicalFile(const char* utf8Path, PCMRegistry& registry,
     detail::PackDecodeCharge* sampleStaging = nullptr,
     const PackMediaDemandResolver* demand = nullptr, bool metadataOnly = false);
 
+// Same bounded read over an already opened byte source. Streamed media keeps
+// the source alive through its PackMediaRange for as long as it is published.
+VnResult ReadPackCanonicalSource(std::shared_ptr<const StreamByteSource> source,
+    PCMRegistry& registry, PackCanonicalImage* out,
+    std::vector<PCMRegistry::PreparedPackSamples>* samples,
+    std::uint64_t* byteCount, std::uint64_t* artifactHash, std::uint64_t maxBytes,
+    std::span<const PCMRegistry::PreparedPackSamples* const> equalCandidates = {},
+    bool* retryWithBytes = nullptr, const detail::PackDecodeBudget& budget = {},
+    detail::PackDecodeCharge* sampleStaging = nullptr,
+    const PackMediaDemandResolver* demand = nullptr, bool metadataOnly = false);
+
 // Already-loaded-state view for the closure check. Every callback
 // answers "does this id resolve outside the pack right now": playables
 // cover the whole flat playable-ID space (PCM, streams, containers),

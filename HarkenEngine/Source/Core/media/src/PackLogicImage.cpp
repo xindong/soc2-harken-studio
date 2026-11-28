@@ -1454,8 +1454,10 @@ struct FileCanonicalSource {
             offset = end;
         }
         // The artifact is exactly fileBytes; growth during validation refuses.
-        std::error_code sizeError;
-        if (std::filesystem::file_size(path, sizeError) != fileBytes || sizeError) return VN_BAD_PACK;
+        if (!path.empty()) {
+            std::error_code sizeError;
+            if (std::filesystem::file_size(path, sizeError) != fileBytes || sizeError) return VN_BAD_PACK;
+        }
         for (std::size_t i = 0; i < image.media.size(); ++i) {
             if (checksums[i] != image.media[i].blobChecksum) return VN_BAD_PACK;
             if (streamed[i] != 0 && !chunkSums[i].Complete()) return VN_BAD_PACK;
@@ -1969,6 +1971,19 @@ VnResult ParsePackCanonicalImageWithBudget(const std::uint8_t* bytes, std::uint6
     } catch (const std::bad_alloc&) { return VN_PACK_RESIDENT_CAPACITY; }
 }
 
+namespace {
+
+VnResult ReadPackCanonicalOpened(std::shared_ptr<const StreamByteSource> file,
+    std::filesystem::path path, PCMRegistry& registry, PackCanonicalImage* out,
+    std::vector<PCMRegistry::PreparedPackSamples>* samples,
+    std::uint64_t* byteCount, std::uint64_t* artifactHash, std::uint64_t maxBytes,
+    std::span<const PCMRegistry::PreparedPackSamples* const> equalCandidates,
+    bool* retryWithBytes, const PackCanonicalReadHooksForTests* hooks,
+    const detail::PackDecodeBudget& budget, detail::PackDecodeCharge* sampleStaging,
+    const PackMediaDemandResolver* demand, bool metadataOnly);
+
+} // namespace
+
 VnResult ReadPackCanonicalFile(const char* utf8Path, PCMRegistry& registry,
     PackCanonicalImage* out, std::vector<PCMRegistry::PreparedPackSamples>* samples,
     std::uint64_t* byteCount, std::uint64_t* artifactHash, std::uint64_t maxBytes,
@@ -1984,6 +1999,43 @@ VnResult ReadPackCanonicalFile(const char* utf8Path, PCMRegistry& registry,
     if (!TryMakeUtf8Path(utf8Path, &path)) return VN_BAD_PACK;
     auto file = OpenStreamByteSource(utf8Path);
     if (file == nullptr) return VN_BAD_PACK;
+    return ReadPackCanonicalOpened(std::move(file), std::move(path), registry, out, samples,
+        byteCount, artifactHash, maxBytes, equalCandidates, retryWithBytes, hooks, budget,
+        sampleStaging, demand, metadataOnly);
+} catch (const std::bad_alloc&) {
+    return VN_PACK_RESIDENT_CAPACITY;
+}
+
+VnResult ReadPackCanonicalSource(std::shared_ptr<const StreamByteSource> source,
+    PCMRegistry& registry, PackCanonicalImage* out,
+    std::vector<PCMRegistry::PreparedPackSamples>* samples,
+    std::uint64_t* byteCount, std::uint64_t* artifactHash, std::uint64_t maxBytes,
+    std::span<const PCMRegistry::PreparedPackSamples* const> equalCandidates,
+    bool* retryWithBytes, const detail::PackDecodeBudget& budget,
+    detail::PackDecodeCharge* sampleStaging, const PackMediaDemandResolver* demand,
+    bool metadataOnly) try {
+    if (budget != nullptr && sampleStaging == nullptr) return VN_INVALID_ARG;
+    if (retryWithBytes != nullptr) *retryWithBytes = false;
+    if (source == nullptr || out == nullptr || samples == nullptr || byteCount == nullptr ||
+        artifactHash == nullptr)
+        return VN_INVALID_ARG;
+    return ReadPackCanonicalOpened(std::move(source), {}, registry, out, samples, byteCount,
+        artifactHash, maxBytes, equalCandidates, retryWithBytes, nullptr, budget, sampleStaging,
+        demand, metadataOnly);
+} catch (const std::bad_alloc&) {
+    return VN_PACK_RESIDENT_CAPACITY;
+}
+
+namespace {
+
+VnResult ReadPackCanonicalOpened(std::shared_ptr<const StreamByteSource> file,
+    std::filesystem::path path, PCMRegistry& registry, PackCanonicalImage* out,
+    std::vector<PCMRegistry::PreparedPackSamples>* samples,
+    std::uint64_t* byteCount, std::uint64_t* artifactHash, std::uint64_t maxBytes,
+    std::span<const PCMRegistry::PreparedPackSamples* const> equalCandidates,
+    bool* retryWithBytes, const PackCanonicalReadHooksForTests* hooks,
+    const detail::PackDecodeBudget& budget, detail::PackDecodeCharge* sampleStaging,
+    const PackMediaDemandResolver* demand, bool metadataOnly) {
     const auto size = file->ByteCount();
     if (size == 0 || size > SIZE_MAX) return VN_BAD_PACK;
     FileCanonicalSource source{std::move(file), size, maxBytes, registry, equalCandidates,
@@ -1999,9 +2051,9 @@ VnResult ReadPackCanonicalFile(const char* utf8Path, PCMRegistry& registry,
         *artifactHash = source.hash;
     }
     return result;
-} catch (const std::bad_alloc&) {
-    return VN_PACK_RESIDENT_CAPACITY;
 }
+
+} // namespace
 
 void CollectSoundStreaming(const ContainerWorldInstallViewV1& view,
                            std::vector<PackSoundStreamingRow>* out) {
